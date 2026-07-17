@@ -5,6 +5,46 @@ const term = @import("terminal.zig");
 const ansi = @import("ansi.zig");
 const screen_mod = @import("screen.zig");
 
+fn handleInput(state: *GameState, input: u8, bounds: *const screen_mod.Bounds) !void {
+    switch (input) {
+        'w' => state.player.move(.up, bounds, &state.player_sprite),
+        's' => state.player.move(.down, bounds, &state.player_sprite),
+        'a' => state.player.move(.left, bounds, &state.player_sprite),
+        'd' => state.player.move(.right, bounds, &state.player_sprite),
+        ' ' => try state.triggerProjectile(&state.player),
+        'q' => state.running = false,
+        else => {},
+    }
+}
+
+fn update(state: *GameState, bounds: *const screen_mod.Bounds) void {
+    // NOTE: bounds is actually not needed for upward movement
+    _ = bounds;
+
+    if (state.projectiles.items.len > 0) {
+        var i: usize = 0;
+        while (i < state.projectiles.items.len) : (i += 1) {
+            var proj = &state.projectiles.items[i];
+            if (proj.y == 0) {
+                _ = state.projectiles.swapRemove(i);
+                // Do not increment i, as the next projectile has shifted into this index
+            } else {
+                proj.y -= 1;
+            }
+        }
+    }
+}
+
+fn drawFrame(screen: *screen_mod.Screen, state: *const GameState) void {
+    screen.clear();
+    drawPlayer(screen, &state.player, &state.player_sprite);
+    if (state.projectiles.items.len > 0) {
+        for (state.projectiles.items) |proj| {
+            _ = screen.set(proj.x, proj.y, proj.value);
+        }
+    }
+}
+
 fn drawPlayer(s: *screen_mod.Screen, player: *const Player, player_sprite: *const Sprite) void {
     // Putting this here for now but will eventually enforece cells.len at a spriteInit level...I think
     if (player_sprite.cells.len != player_sprite.height * player_sprite.width) {
@@ -69,11 +109,106 @@ const Player = struct {
     }
 };
 
+const Projectile = struct {
+    x: usize,
+    y: usize,
+    value: u8,
+};
+
+const GameState = struct {
+    player: Player,
+    player_sprite: Sprite,
+    projectiles: std.ArrayList(Projectile),
+    running: bool,
+
+    const Self = @This();
+
+    fn triggerProjectile(self: *Self, player: *const Player) !void {
+        if (self.projectiles.items.len == self.projectiles.capacity) {
+            return;
+        }
+        const proj = Projectile{
+            .x = player.x + 2, // Center of the player sprite
+            .y = player.y - 1, // Just above the player
+            .value = '|',
+        };
+        _ = try self.projectiles.appendBounded(proj);
+    }
+};
+
 pub fn initPlayer() Player {
     return Player{
         .x = 0,
         .y = 0,
     };
+}
+
+pub fn main(init: std.process.Init) !void {
+    var out_buf: [4096]u8 = undefined;
+    var stdout_writer = std.Io.File.stdout().writer(init.io, &out_buf);
+    const stdout = &stdout_writer.interface;
+
+    var in_buf: [1]u8 = undefined;
+    var stdin_reader = std.Io.File.stdin().reader(init.io, &in_buf);
+
+    const stdin = &stdin_reader.interface;
+
+    const original = try term.enableRawMode();
+    defer term.restoreTerminal(original);
+
+    try stdout.print("{s}{s}{s}", .{ ansi.enter_alt_screen, ansi.hide_cursor, ansi.clear_screen });
+    try stdout.flush();
+
+    defer {
+        stdout.print("{s}{s}", .{ ansi.show_cursor, ansi.leave_alt_screen }) catch {};
+        stdout.flush() catch {};
+    }
+
+    var player = initPlayer();
+    const player_sprite = Sprite{
+        .width = 5,
+        .height = 3,
+        .cells = " /^\\ " ++
+            "<@@@>" ++
+            " / \\ ",
+    };
+    var screen = screen_mod.initScreen(50);
+
+    screen.clear();
+    drawPlayer(&screen, &player, &player_sprite);
+    try screen.present(stdout);
+
+    var projectiles: [8]Projectile = undefined;
+    const projs = std.ArrayList(Projectile).initBuffer(&projectiles);
+
+    var state = GameState{
+        .player = player,
+        .projectiles = projs,
+        .running = true,
+        .player_sprite = player_sprite,
+    };
+
+    var poll_fds = [_]std.posix.pollfd{.{
+        .fd = std.posix.STDIN_FILENO,
+        .events = std.posix.POLL.IN,
+        .revents = 0,
+    }};
+
+    while (true) {
+        const ready = try std.posix.poll(&poll_fds, 50);
+        if (ready > 0 and
+            poll_fds[0].revents & std.posix.POLL.IN == std.posix.POLL.IN)
+        {
+            const input = try stdin.takeByte();
+            try handleInput(&state, input, &screen.bounds);
+        }
+        if (!state.running) {
+            break;
+        }
+        update(&state, &screen.bounds);
+        drawFrame(&screen, &state);
+        try screen.present(stdout);
+    }
 }
 
 test "drawPlayer draws at the origin and preserves transparent cells" {
@@ -170,128 +305,3 @@ test "player movement handles exact-fit and oversized sprites" {
     try std.testing.expectEqual(@as(usize, 0), player.x);
     try std.testing.expectEqual(@as(usize, 0), player.y);
 }
-
-pub fn main(init: std.process.Init) !void {
-    var out_buf: [4096]u8 = undefined;
-    var stdout_writer = std.Io.File.stdout().writer(init.io, &out_buf);
-    const stdout = &stdout_writer.interface;
-
-    var in_buf: [1]u8 = undefined;
-    var stdin_reader = std.Io.File.stdin().reader(init.io, &in_buf);
-
-    const stdin = &stdin_reader.interface;
-
-    const original = try term.enableRawMode();
-    defer term.restoreTerminal(original);
-
-    try stdout.print("{s}{s}{s}", .{ ansi.enter_alt_screen, ansi.hide_cursor, ansi.clear_screen });
-    try stdout.flush();
-
-    defer {
-        stdout.print("{s}{s}", .{ ansi.show_cursor, ansi.leave_alt_screen }) catch {};
-        stdout.flush() catch {};
-    }
-
-    var player = initPlayer();
-    const player_sprite = Sprite{
-        .width = 5,
-        .height = 3,
-        .cells = " /^\\ " ++
-            "<@@@>" ++
-            " / \\ ",
-    };
-    var screen = screen_mod.initScreen(50);
-
-    screen.clear();
-    drawPlayer(&screen, &player, &player_sprite);
-    try screen.present(stdout);
-
-    var state = GameState{
-        .player = player,
-        .projectile = null,
-        .running = true,
-        .player_sprite = player_sprite,
-    };
-
-    var poll_fds = [_]std.posix.pollfd{.{
-        .fd = std.posix.STDIN_FILENO,
-        .events = std.posix.POLL.IN,
-        .revents = 0,
-    }};
-
-    while (true) {
-        const ready = try std.posix.poll(&poll_fds, 100);
-        if (ready > 0 and
-            poll_fds[0].revents & std.posix.POLL.IN == std.posix.POLL.IN)
-        {
-            const input = try stdin.takeByte();
-            handleInput(&state, input, &screen.bounds);
-        }
-        if (!state.running) {
-            break;
-        }
-        update(&state, &screen.bounds);
-        drawFrame(&screen, &state);
-        try screen.present(stdout);
-    }
-}
-
-fn handleInput(state: *GameState, input: u8, bounds: *const screen_mod.Bounds) void {
-    switch (input) {
-        'w' => state.player.move(.up, bounds, &state.player_sprite),
-        's' => state.player.move(.down, bounds, &state.player_sprite),
-        'a' => state.player.move(.left, bounds, &state.player_sprite),
-        'd' => state.player.move(.right, bounds, &state.player_sprite),
-        ' ' => state.triggerProjectile(&state.player),
-        'q' => state.running = false,
-        else => {},
-    }
-}
-
-fn update(state: *GameState, bounds: *const screen_mod.Bounds) void {
-    // NOTE: bounds is actually not needed for upward movement
-    _ = bounds;
-
-    if (state.projectile) |*proj| {
-        if (proj.y > 0) {
-            proj.y -= 1;
-        } else {
-            state.projectile = null;
-        }
-    }
-}
-
-fn drawFrame(screen: *screen_mod.Screen, state: *const GameState) void {
-    screen.clear();
-    drawPlayer(screen, &state.player, &state.player_sprite);
-    if (state.projectile) |proj| {
-        _ = screen.set(proj.x, proj.y, proj.value);
-    }
-}
-
-const Projectile = struct {
-    x: usize,
-    y: usize,
-    value: u8,
-};
-
-const GameState = struct {
-    player: Player,
-    player_sprite: Sprite,
-    projectile: ?Projectile,
-    running: bool,
-
-    const Self = @This();
-
-    fn triggerProjectile(self: *Self, player: *const Player) void {
-        if (self.projectile) |_| {
-            // If a projectile already exists, do not trigger a new one
-            return;
-        }
-        self.projectile = Projectile{
-            .x = player.x + 2, // Assuming the projectile starts in front of the player
-            .y = player.y,
-            .value = '|',
-        };
-    }
-};

@@ -74,7 +74,7 @@ Current milestone: move one multi-cell ASCII sprite around a fixed logical canva
   - Deactivate it when it leaves the canvas.
   - Keep the buffer single-threaded; do not introduce a mutex.
 
-- [ ] Support multiple projectiles only after one works
+- [x] Support multiple projectiles only after one works
   - Store active projectiles in a bounded collection first.
   - Update and draw each projectile through the same frame loop.
 
