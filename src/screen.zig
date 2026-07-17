@@ -27,7 +27,6 @@ pub const Screen = struct {
     }
 
     pub fn present(self: *const Self, stdout: *std.Io.Writer) !void {
-        try stdout.writeAll(ansi.clear_screen);
         try stdout.writeAll(ansi.cursor_home);
         for (0..self.bounds.height) |t| {
             const start = t * self.bounds.width;
@@ -35,7 +34,9 @@ pub const Screen = struct {
 
             const row = self.screen_buffer[start..end];
             try stdout.writeAll(row);
-            try stdout.writeAll("\r\n");
+            if (t < self.bounds.height - 1) {
+                try stdout.writeAll("\r\n");
+            }
         }
         try stdout.flush();
     }
@@ -61,4 +62,20 @@ pub fn initScreen(width: usize) Screen {
         .bounds = Bounds{ .height = height, .width = width },
         .screen_buffer = fixed_size_array,
     };
+}
+
+test "set writes a cell at valid coordinates" {
+    var screen = initScreen(50);
+    screen.clear();
+
+    try std.testing.expect(screen.set(2, 3, 'X'));
+    try std.testing.expectEqual(@as(u8, 'X'), screen.screen_buffer[3 * screen.bounds.width + 2]);
+}
+
+test "set rejects coordinates outside the screen" {
+    var screen = initScreen(50);
+    screen.clear();
+
+    try std.testing.expect(!screen.set(screen.bounds.width, 0, 'X'));
+    try std.testing.expect(!screen.set(0, screen.bounds.height, 'X'));
 }

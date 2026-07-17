@@ -28,7 +28,7 @@ Current milestone: move one multi-cell ASCII sprite around a fixed logical canva
   - Draw and present once after the update.
   - Let unknown keys leave state unchanged.
 
-- [ ] Tighten terminal presentation
+- [x] Tighten terminal presentation
   - Clear the physical terminal once during setup.
   - Return the cursor home before each frame.
   - Emit `\r\n` explicitly because raw mode disables `OPOST`.
@@ -37,23 +37,23 @@ Current milestone: move one multi-cell ASCII sprite around a fixed logical canva
 
 ## 2. Render One Sprite
 
-- [ ] Define one hard-coded rectangular ASCII sprite
+- [x] Define one hard-coded rectangular ASCII sprite
   - Store width, height, and read-only cells.
   - Enforce `cells.len == width * height`.
   - Use spaces as transparent cells for the first version.
 
-- [ ] Draw the sprite into the screen
+- [x] Draw the sprite into the screen
   - Iterate through sprite-local coordinates.
   - Translate local coordinates into screen coordinates.
   - Skip transparent cells.
   - Clip cells that fall outside the screen instead of panicking.
 
-- [ ] Make movement account for sprite dimensions
+- [x] Make movement account for sprite dimensions
   - Keep the entire sprite inside the logical canvas.
   - Handle a sprite larger than the screen without unsigned underflow.
   - Verify every edge independently.
 
-- [ ] Add focused tests for pure screen logic
+- [x] Add focused tests for pure screen logic
   - Set a valid cell.
   - Reject an invalid coordinate.
   - Draw a sprite at the origin.
@@ -62,13 +62,13 @@ Current milestone: move one multi-cell ASCII sprite around a fixed logical canva
 
 ## 3. Add A Timed Event Loop
 
-- [ ] Reshape the loop into explicit phases
+- [x] Reshape the loop into explicit phases
   - Poll input with a timeout instead of blocking indefinitely.
   - Handle available input.
   - Update application state.
   - Clear, draw, and present the frame.
 
-- [ ] Add one projectile as application state
+- [x] Add one projectile as application state
   - A shoot input creates or activates the projectile.
   - Advance it once per update rather than running a blocking shoot loop.
   - Deactivate it when it leaves the canvas.
