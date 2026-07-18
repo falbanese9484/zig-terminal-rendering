@@ -9,7 +9,7 @@ pub const Bounds = struct {
 
 pub const Screen = struct {
     bounds: Bounds,
-    screen_buffer: [3000]u8,
+    screen_buffer: [6000]u8,
 
     const Self = @This();
 
@@ -47,7 +47,7 @@ pub fn initScreen(width: usize) Screen {
         @panic("Width must be greater than 0");
     }
 
-    const fixed_size_array: [3000]u8 = undefined;
+    const fixed_size_array: [6000]u8 = undefined;
 
     if (fixed_size_array.len % width != 0) {
         @panic("Width must be a divisor of the fixed size array length");

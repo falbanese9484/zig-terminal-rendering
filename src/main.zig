@@ -17,10 +17,26 @@ fn handleInput(state: *GameState, input: u8, bounds: *const screen_mod.Bounds) !
     }
 }
 
-fn update(state: *GameState, bounds: *const screen_mod.Bounds) void {
-    // NOTE: bounds is actually not needed for upward movement
-    _ = bounds;
+fn setRandomTarget(
+    state: *GameState,
+    bounds: *const screen_mod.Bounds,
+    random: std.Random,
+) void {
+    // Needs player bounds i.e. the wdth and height of the sprite
+    state.target = .{
+        .x = random.uintLessThan(usize, bounds.width - 2),
+        .y = random.uintLessThan(usize, bounds.height - 4),
+        .value = 'X',
+    };
+}
 
+fn update(state: *GameState, bounds: *const screen_mod.Bounds, random: std.Random) void {
+    // I think this makes sense to put here..
+    state.setCollisionNull();
+
+    if (state.target == null) {
+        setRandomTarget(state, bounds, random);
+    }
     if (state.projectiles.items.len > 0) {
         var i: usize = 0;
         while (i < state.projectiles.items.len) : (i += 1) {
@@ -30,6 +46,14 @@ fn update(state: *GameState, bounds: *const screen_mod.Bounds) void {
                 // Do not increment i, as the next projectile has shifted into this index
             } else {
                 proj.y -= 1;
+            }
+            if (state.target) |target| {
+                if (target.x == proj.x and target.y == proj.y) {
+                    // Collision occured, wipe the projectile and the target and set the action
+                    state.setCollision(target.x, target.y, '-');
+                    state.target = null;
+                    _ = state.projectiles.swapRemove(i);
+                }
             }
         }
     }
@@ -42,6 +66,14 @@ fn drawFrame(screen: *screen_mod.Screen, state: *const GameState) void {
         for (state.projectiles.items) |proj| {
             _ = screen.set(proj.x, proj.y, proj.value);
         }
+    }
+    if (state.target) |target| {
+        _ = screen.set(target.x, target.y, target.value);
+    }
+    if (state.collision) |collision| {
+        // We need to check bounds here to make sure we dont overflow
+        _ = screen.set(collision.x, collision.y + 1, collision.value);
+        _ = screen.set(collision.x, collision.y - 1, collision.value);
     }
 }
 
@@ -115,11 +147,25 @@ const Projectile = struct {
     value: u8,
 };
 
+const Target = struct {
+    x: usize,
+    y: usize,
+    value: u8,
+};
+
+const Collision = struct {
+    x: usize,
+    y: usize,
+    value: u8,
+};
+
 const GameState = struct {
     player: Player,
     player_sprite: Sprite,
     projectiles: std.ArrayList(Projectile),
+    target: ?Target,
     running: bool,
+    collision: ?Collision,
 
     const Self = @This();
 
@@ -134,16 +180,33 @@ const GameState = struct {
         };
         _ = try self.projectiles.appendBounded(proj);
     }
+
+    fn setCollision(self: *Self, x: usize, y: usize, value: u8) void {
+        self.collision = .{
+            .x = x,
+            .y = y,
+            .value = value,
+        };
+    }
+
+    fn setCollisionNull(self: *Self) void {
+        self.collision = null;
+    }
 };
 
-pub fn initPlayer() Player {
+pub fn initPlayer(height: usize) Player {
     return Player{
         .x = 0,
-        .y = 0,
+        .y = height,
     };
 }
 
 pub fn main(init: std.process.Init) !void {
+    var seed: u64 = undefined;
+    init.io.random(std.mem.asBytes(&seed));
+
+    var prng = std.Random.DefaultPrng.init(seed);
+    const random = prng.random();
     var out_buf: [4096]u8 = undefined;
     var stdout_writer = std.Io.File.stdout().writer(init.io, &out_buf);
     const stdout = &stdout_writer.interface;
@@ -164,7 +227,6 @@ pub fn main(init: std.process.Init) !void {
         stdout.flush() catch {};
     }
 
-    var player = initPlayer();
     const player_sprite = Sprite{
         .width = 5,
         .height = 3,
@@ -172,7 +234,8 @@ pub fn main(init: std.process.Init) !void {
             "<@@@>" ++
             " / \\ ",
     };
-    var screen = screen_mod.initScreen(50);
+    var screen = screen_mod.initScreen(100);
+    var player = initPlayer(screen.bounds.height - player_sprite.height);
 
     screen.clear();
     drawPlayer(&screen, &player, &player_sprite);
@@ -186,7 +249,11 @@ pub fn main(init: std.process.Init) !void {
         .projectiles = projs,
         .running = true,
         .player_sprite = player_sprite,
+        .target = null,
+        .collision = null,
     };
+
+    setRandomTarget(&state, &screen.bounds, random);
 
     var poll_fds = [_]std.posix.pollfd{.{
         .fd = std.posix.STDIN_FILENO,
@@ -205,7 +272,7 @@ pub fn main(init: std.process.Init) !void {
         if (!state.running) {
             break;
         }
-        update(&state, &screen.bounds);
+        update(&state, &screen.bounds, random);
         drawFrame(&screen, &state);
         try screen.present(stdout);
     }
